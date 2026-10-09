@@ -46,6 +46,16 @@ class Settings:
   local_embed_model: str = field(
     default_factory=lambda: _env("LOCAL_EMBED_MODEL", "BAAI/bge-base-en-v1.5")
   )
+  
+  remote_llm_base_url: str = field(
+    default_factory=lambda: _env("REMOTE_LLM_BASE_URL", "")
+  )
+  remote_llm_model: str = field(
+    default_factory=lambda: _env("REMOTE_LLM_MODEL", "Qwen/Qwen2.5-Coder-7B-Instruct")
+  )
+  remote_llm_auth_secret: str = field(
+    default_factory=lambda: _env("REMOTE_LLM_AUTH_SECRET", "")
+  )
 
   cloud_rerank_url: str   = field(default_factory=lambda: _env("CLOUD_RERANK_URL"))
   local_rerank_model: str = field(
