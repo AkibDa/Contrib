@@ -757,13 +757,24 @@ Issue:
 Return a JSON object with exactly these keys:
 {{
   "issue_type": "bug|feature|docs|refactor|test",
-  "difficulty": "beginner|intermediate|advanced",
-  "difficulty_reason": "one short sentence",
-  "root_cause_hypothesis": "what is most likely causing this",
+  "difficulty": {{
+    "level": "easy|medium|hard",
+    "label": "Short label",
+    "score": 5,
+    "estimated_hours": {{"min": 1, "max": 2}},
+    "reasons": ["reason 1"],
+    "confidence": "high|medium|low",
+    "good_first_issue": true
+  }},
+  "problem_summary": "One sentence summary of the issue.",
+  "root_cause": {{
+    "hypothesis": "what is most likely causing this",
+    "status": "potential"
+  }},
   "required_skills": ["skill1", "skill2"],
-  "estimated_hours": "1-2|2-4|4-8|8-16|16+",
-  "affected_areas": ["area1", "area2"],
-  "good_first_issue": true
+  "affected_areas": [
+    {{"path": "path/to/file", "role": "Main logic", "why": "reason"}}
+  ]
 }}"""
     try:
         resp = Settings.llm.complete(prompt)
@@ -1600,89 +1611,133 @@ def _low_confidence_fallback(
     }
 
 def run_repo_qa(engine_bundle: dict, question: str) -> dict:
-    """
-    Answer a free-form question about the repository using the RAG pipeline.
+    import time
+    t0 = time.perf_counter()
+    
+    sources = engine_bundle.get("sources", {})
+    project_structure = engine_bundle.get("project_structure", [])
+    truncated = engine_bundle.get("truncated", False)
 
-    Grounding: instructs the model to cite only retrieved files and flag gaps.
-    """
-    sources: Dict[str, str] = engine_bundle["sources"]
     question_lower = question.lower()
-
-    is_architecture_query = any(
-      q in question_lower
-      for q in ARCHITECTURE_QUERIES
-    )
-
-    if is_architecture_query:
-      logger.info("Architecture query detected — using structure-aware retrieval")
-
-      model_files = find_model_related_files(sources)
-
-      if not model_files:
-        return {
-          "answer": (
-            "I could not confidently identify the model loading files."
-          ),
-          "relevant_files": [],
-        }
-
-      top_files = model_files[:5]
-
-      formatted_files = "\n".join([
-        f"- {f['path']} (matched: {', '.join(f['matched_keywords'][:5])})"
-        for f in top_files
-      ])
-
-      answer = (
-        "These files are most likely responsible for loading or running "
-        "the deepfake detection model:\n\n"
-        f"{formatted_files}\n\n"
-        "Look for code involving model initialization, weight loading, "
-        "or prediction/inference logic."
-      )
-
-      return {
-        "answer": answer,
-        "relevant_files": [f["path"] for f in top_files],
-      }
-
-    retrieval       = run_retrieval_agent(engine_bundle, question)
-    retrieved_files = [f["path"] for f in retrieval.get("relevant_files", [])]
-    sources: Dict[str, str] = engine_bundle["sources"]
-
-    code_context = _build_code_context(retrieved_files, sources, max_chars_per_file=2_000, total_cap=6_000)
-    valid_paths  = "\n".join(f"  - {fp}" for fp in retrieved_files) or "  (none)"
+    
+    retrieval = run_retrieval_agent(engine_bundle, question)
+    raw_files = [f["path"] for f in retrieval.get("relevant_files", []) if "path" in f]
+    retrieved_files = [f for f in raw_files if f in sources]
+    
+    context_parts = []
+    total_len = 0
+    for fp in retrieved_files:
+        src = sources[fp]
+        numbered_src = "\n".join(f"{i+1:4d} | {line}" for i, line in enumerate(src.split("\n")))
+        snippet = f"--- {fp} ---\n{numbered_src}\n"
+        if total_len + len(snippet) > 6000:
+            break
+        context_parts.append(snippet)
+        total_len += len(snippet)
+    
+    code_context = "\n".join(context_parts)
+    valid_paths = "\n".join(f"  - {fp}" for fp in retrieved_files) or "  (none)"
 
     prompt = f"""You are an expert AI mentor helping a developer understand a codebase.
-Answer the question using ONLY the source code provided. Do not reference files not listed below.
-If the answer cannot be found in the context, say so clearly.
+Answer the question using ONLY the source code chunks provided below. 
+Do not invent code, outputs, or attribute names. Quote identifiers exactly as they appear.
+If the answer cannot be found in the context, say "not found in the retrieved files".
+Include the exact file path for every claim. Keep your answer concise (under ~250 words unless more is needed).
 
 Files you may reference:
 {valid_paths}
 
 Question: {question[:600]}
 
-Relevant source code:
+Relevant source code (with line numbers):
 {code_context}
 
-Format your answer in clean Markdown. Cite specific function or class names from the code when possible."""
+Format your answer as a JSON object with:
+- "answer": Markdown string (use headings, lists, fenced code blocks with language tags, NEVER use '...').
+- "sections": Array of objects {{ "title": string, "content": string (Markdown), "references": [string] (MUST be exact paths from the Files list above) }}
+"""
+    
+    sections = []
+    answer = ""
+    kwargs = {"temperature": 0.1}
+    
+    schema = {
+        "type": "object",
+        "properties": {
+            "answer": {"type": "string"},
+            "sections": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "content": {"type": "string"},
+                        "references": {
+                            "type": "array",
+                            "items": {"type": "string"}
+                        }
+                    },
+                    "required": ["title", "content", "references"]
+                }
+            }
+        },
+        "required": ["answer", "sections"]
+    }
+    
     try:
-        answer = str(Settings.llm.complete(prompt)).strip()
+        if "ollama" in Settings.llm.__class__.__name__.lower():
+            import json
+            resp = Settings.llm.complete(prompt, format=schema, **kwargs)
+            parsed = json.loads(str(resp).strip())
+        else:
+            resp = Settings.llm.complete(prompt, **kwargs)
+            parsed = extract_json(str(resp))
+            
+        answer = parsed.get("answer", "")
+        sections = parsed.get("sections", [])
+            
     except Exception as exc:
-        logger.exception("QA agent failed")
-
-        return {
-          "answer": (
-            "The QA agent failed to generate a grounded response. "
-            "Please check the inference server or Ollama connection."
-          ),
-          "relevant_files": [],
-          "error": str(exc),
-        }
-
+        logger.warning(f"QA agent JSON error: {exc}. Retrying...")
+        try:
+            resp = Settings.llm.complete(prompt, **kwargs)
+            parsed = extract_json(str(resp))
+            answer = parsed.get("answer", "")
+            sections = parsed.get("sections", [])
+        except Exception:
+            answer = str(resp) if 'resp' in locals() else "Fallback response."
+            sections = [{"title": fp, "content": f"Relevant file found: {fp}", "references": [fp]} for fp in retrieved_files[:3]]
+    
+    valid_sections = []
+    for s in sections:
+        refs = [r for r in s.get("references", []) if r in sources]
+        valid_sections.append({
+            "title": s.get("title", "Section"),
+            "content": s.get("content", ""),
+            "references": list(set(refs))
+        })
+        
+    citations = []
+    for f in retrieved_files[:3]:
+        citations.append({
+            "file": f,
+            "start_line": 1,
+            "end_line": min(10, len(sources[f].split("\n"))),
+            "snippet": sources[f][:300]
+        })
+        
+    t_end = time.perf_counter()
+    timings = retrieval.get("timings", {})
+    timings["total_generation"] = (t_end - t0) * 1000
+    timings["total"] = timings.get("total", 0) + timings["total_generation"]
+    
     return {
-        "answer":         answer,
+        "answer": answer,
         "relevant_files": retrieved_files,
+        "project_structure": project_structure,
+        "sections": valid_sections,
+        "citations": citations,
+        "truncated": truncated,
+        "timings": timings,
     }
 
 async def build_query_engine_async(content: str, repo_name: str) -> dict:
@@ -1691,3 +1746,32 @@ async def build_query_engine_async(content: str, repo_name: str) -> dict:
     responsive during the CPU/GPU-heavy embedding phase.
     """
     return await asyncio.to_thread(build_query_engine, content, repo_name)
+def compute_complexity_factors(sources: dict, fix_zone: dict) -> dict:
+    factors = {
+        "files_touched": 1,
+        "target_function_complexity": 0,
+        "has_tests": False,
+        "cross_module": False
+    }
+    if not fix_zone:
+        return factors
+        
+    fp = fix_zone.get("file_path")
+    if fp and fp in sources and fp.endswith(".py"):
+        src = sources[fp]
+        try:
+            from radon.complexity import cc_visit
+            blocks = cc_visit(src)
+            funcs = fix_zone.get("likely_functions", [])
+            max_c = 0
+            for b in blocks:
+                if b.name in funcs and b.complexity > max_c:
+                    max_c = b.complexity
+            if max_c > 0:
+                factors["target_function_complexity"] = max_c
+            elif blocks:
+                factors["target_function_complexity"] = max(b.complexity for b in blocks)
+        except Exception:
+            pass
+            
+    return factors
