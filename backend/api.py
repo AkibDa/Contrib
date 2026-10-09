@@ -481,7 +481,7 @@ async def health(request: Request,):
         "indexing":     in_progress,
     }
 @router.post("/analyze-repo")
-async def analyze_repo(req: AnalyzeRequest):
+async def analyze_repo(req: RepoLoadRequest):
     """Broad review of architecture, risks, quality, docs, dependencies."""
     if not validate_github_url(req.repo_url):
         raise HTTPException(400, "Invalid GitHub URL")
