@@ -597,7 +597,7 @@ from github_issues import fetch_open_issues, fast_score_issue, detect_linked_pr_
 
 @router.post("/repo-issues")
 @limiter.limit("5/minute")
-async def get_repo_issues(req: Request, payload: RepoIssuesRequest):
+async def get_repo_issues(request: Request, payload: RepoIssuesRequest):
     import time
     from utils import get_repo_name
     from services import repo_cache
