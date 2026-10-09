@@ -229,7 +229,7 @@ function GlitchText({ text, className = '' }) {
 
 function BootSequence({ onDone }) {
   const lines = [
-    '> INITIALIZING FIRSTPR MENTOR v2.4.1',
+    '> INITIALIZING CONTRIB MENTOR v2.4.1',
     '> LOADING NEURAL CODEBASE ENGINE...',
     '> CONNECTING TO GITHUB API...',
     '> READY.',
@@ -395,7 +395,7 @@ export default function App() {
                           lineHeight: 1.2,
                           marginBottom: 8,
                         }}>
-                          <GlitchText text="FIRSTPR_MENTOR" /><span style={{ color: 'var(--text-muted)' }}></span>
+                          <GlitchText text="CONTRIB_MENTOR" /><span style={{ color: 'var(--text-muted)' }}></span>
                     </h1>
                   </span>
                 </div>
@@ -422,7 +422,7 @@ export default function App() {
                           lineHeight: 1.2,
                           marginBottom: 8,
                         }}>
-                          FIRSTPR<span style={{ color: 'var(--text-muted)' }}>_</span>MENTOR
+                          CONTRIB<span style={{ color: 'var(--text-muted)' }}>_</span>MENTOR
                         </h1>
                         <p style={{ color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.6, letterSpacing: 0.5 }}>
                           // Paste a GitHub repository URL to begin codebase ingestion.
