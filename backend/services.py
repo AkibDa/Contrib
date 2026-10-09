@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from config import settings
 import asyncio
 import json
@@ -1878,10 +1879,31 @@ async def build_query_engine_progressive(content: str, repo_name: str, commit_sh
     files = await asyncio.to_thread(_split_repo_content, content)
     t_filter = time.perf_counter() - t0
     
+
     sources = {fp: src for fp, src in files}
     file_priorities = {fp: _file_priority(fp) for fp, _ in files}
 
+    cache_dir = os.path.join(".cache", safe_name)
+    os.makedirs(cache_dir, exist_ok=True)
+    tree_path = os.path.join(cache_dir, "tree.json")
+    sources_path = os.path.join(cache_dir, "sources.json")
+    
+    if os.path.exists(tree_path) and os.path.exists(sources_path) and is_complete:
+        with open(tree_path, "r") as f:
+            tree_data = json.load(f)
+            project_structure = tree_data.get("project_structure", [])
+            truncated = tree_data.get("truncated", False)
+        with open(sources_path, "r") as f:
+            sources = json.load(f)
+    else:
+        project_structure, truncated = build_project_tree(sources)
+        with open(tree_path, "w") as f:
+            json.dump({"project_structure": project_structure, "truncated": truncated}, f)
+        with open(sources_path, "w") as f:
+            json.dump(sources, f)
+
     # BM25 build
+
     bm25_corpus, bm25_nodes = [], []
     for fp, src in files:
         tokens = re.findall(r"[a-zA-Z_]\w*", src)
@@ -1890,14 +1912,18 @@ async def build_query_engine_progressive(content: str, repo_name: str, commit_sh
 
     bm25 = BM25Okapi(bm25_corpus) if bm25_corpus else None
     
+
     bundle = {
         "vector_index": None,
         "bm25": bm25,
         "bm25_nodes": bm25_nodes,
         "sources": sources,
         "file_priorities": file_priorities,
-        "is_embedding": not is_complete
+        "is_embedding": not is_complete,
+        "project_structure": project_structure,
+        "truncated": truncated
     }
+
     
     yield {"status": "bm25_ready", "bundle": bundle}
 

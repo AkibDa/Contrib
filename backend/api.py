@@ -15,6 +15,13 @@ import json
 
 from schemas import AnalyzeRequest, RepoLoadRequest, RepoQARequest
 from utils import validate_github_url, get_repo_name, fetch_github_issue
+
+def normalize_repo_url(url: str) -> str:
+    url = url.rstrip("/")
+    if url.endswith(".git"):
+        url = url[:-4]
+    return url.rstrip("/")
+
 from gitingest import ingest_async
 from services import (
   repo_cache,
@@ -93,7 +100,7 @@ async def load_repo(request: Request, req: RepoLoadRequest):
 
   await check_repo_size(req.repo_url, max_mb=300)
 
-  cache_key = req.repo_url.rstrip("/")
+  cache_key = normalize_repo_url(req.repo_url)
   repo_name = get_repo_name(req.repo_url)
 
   if cache_key in repo_cache:
@@ -223,7 +230,7 @@ async def analyze_issue(
     if not validate_github_url(req.repo_url):
         raise HTTPException(400, "Invalid GitHub URL")
 
-    cache_key = req.repo_url.rstrip("/")
+    cache_key = normalize_repo_url(req.repo_url)
     if cache_key not in repo_cache:
         raise HTTPException(
             400,
@@ -415,15 +422,18 @@ async def _streamed_pipeline(issue_full: str, pipeline_coro_factory) -> AsyncGen
 @router.get("/repo-tree")
 @limiter.limit("5/minute")
 async def get_repo_tree(request: Request, repo_url: str):
-    cache_key = repo_url.rstrip("/")
+    cache_key = normalize_repo_url(repo_url)
     if cache_key not in repo_cache:
         raise HTTPException(400, "Repository not loaded.")
-    return {"project_structure": repo_cache[cache_key]["engine_bundle"].get("project_structure", [])}
+    return {
+        "project_structure": repo_cache[cache_key]["engine_bundle"].get("project_structure", []),
+        "truncated": repo_cache[cache_key]["engine_bundle"].get("truncated", False)
+    }
 
 @router.get("/file")
 @limiter.limit("30/minute")
 async def get_file(request: Request, repo_url: str, path: str):
-    cache_key = repo_url.rstrip("/")
+    cache_key = normalize_repo_url(repo_url)
     if cache_key not in repo_cache:
         raise HTTPException(400, "Repository not loaded.")
     sources = repo_cache[cache_key]["engine_bundle"]["sources"]
@@ -455,7 +465,7 @@ async def ask_repo(request: Request,req: RepoQARequest):
     if not validate_github_url(req.repo_url):
         raise HTTPException(400, "Invalid GitHub URL")
 
-    cache_key = req.repo_url.rstrip("/")
+    cache_key = normalize_repo_url(req.repo_url)
     if cache_key not in repo_cache:
         raise HTTPException(
             400,
@@ -509,7 +519,7 @@ async def analyze_repo(req: RepoLoadRequest):
     if not validate_github_url(req.repo_url):
         raise HTTPException(400, "Invalid GitHub URL")
 
-    cache_key = req.repo_url.rstrip("/")
+    cache_key = normalize_repo_url(req.repo_url)
     if cache_key not in repo_cache:
         raise HTTPException(400, "Repository not loaded. Call POST /api/load-repo first.")
 
