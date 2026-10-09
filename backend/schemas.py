@@ -90,3 +90,31 @@ class CodeExplanation(BaseModel):
     default=None,
     description="Optional unified diff with a concrete code fix.",
   )
+
+class TreeNode(BaseModel):
+  name: str
+  path: str
+  type: str
+  children: Optional[List["TreeNode"]] = None
+
+class Section(BaseModel):
+  title: str
+  content: str
+  references: List[str] = Field(default_factory=list)
+
+class Citation(BaseModel):
+  file: str
+  start_line: int
+  end_line: int
+  snippet: str
+
+class AskResponse(BaseModel):
+  repo_name: str
+  answer: str = ""
+  relevant_files: List[str] = Field(default_factory=list)
+  project_structure: List[TreeNode] = Field(default_factory=list)
+  sections: List[Section] = Field(default_factory=list)
+  citations: List[Citation] = Field(default_factory=list)
+  truncated: Optional[bool] = None
+
+TreeNode.model_rebuild()
