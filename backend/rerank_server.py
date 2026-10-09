@@ -1,12 +1,15 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from sentence_transformers import CrossEncoder
+import torch
 
 app = FastAPI()
 
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
 model = CrossEncoder(
   "cross-encoder/ms-marco-MiniLM-L-6-v2",
-  device="cuda"
+  device=device
 )
 
 class RerankRequest(BaseModel):
