@@ -315,6 +315,18 @@ async def analyze_issue(
 
         analysis, retrieval = await asyncio.gather(analysis_task, retrieval_task)
 
+        from services import compute_complexity_factors
+        fix_zone = retrieval.get("most_likely_fix_zone") or {}
+        factors = compute_complexity_factors(sources, fix_zone)
+        
+        if "difficulty" in analysis and isinstance(analysis["difficulty"], dict):
+            analysis["difficulty"]["factors"] = factors
+            c = factors.get("target_function_complexity", 0)
+            if c > 20:
+                analysis["difficulty"]["level"] = "hard"
+            elif c > 10:
+                analysis["difficulty"]["level"] = "medium"
+            
         retrieved_file_paths = [
             f["path"] for f in retrieval.get("relevant_files", []) if "path" in f
         ]
@@ -363,6 +375,17 @@ async def _streamed_pipeline(issue_full: str, pipeline_coro_factory) -> AsyncGen
     await asyncio.sleep(0)
     try:
         result = await pipeline_coro_factory()
+        
+        if "answer" in result:
+            struct = {
+                "relevant_files": result.get("relevant_files", []),
+                "project_structure": result.get("project_structure", []),
+                "sections": result.get("sections", []),
+                "citations": result.get("citations", []),
+                "timings": result.get("timings", {})
+            }
+            yield json.dumps({"status": "structured", "result": struct}) + "\n"
+            
         yield json.dumps({"status": "done", "result": result}) + "\n"
     except Exception as exc:
         yield json.dumps({"status": "error", "detail": repr(exc)}) + "\n"
@@ -456,4 +479,67 @@ async def health(request: Request,):
         "status":       "ok",
         "cached_repos": list(repo_cache.keys()),
         "indexing":     in_progress,
+    }
+@router.post("/analyze-repo")
+async def analyze_repo(req: RepoLoadRequest):
+    """Broad review of architecture, risks, quality, docs, dependencies."""
+    if not validate_github_url(req.repo_url):
+        raise HTTPException(400, "Invalid GitHub URL")
+
+    cache_key = req.repo_url.rstrip("/")
+    if cache_key not in repo_cache:
+        raise HTTPException(400, "Repository not loaded. Call POST /api/load-repo first.")
+
+    entry = repo_cache[cache_key]
+    tree = entry["tree"]
+    
+    findings = []
+    
+    tree_lower = tree.lower()
+    
+    if "requirements.txt" not in tree_lower and "package.json" not in tree_lower and "pyproject.toml" not in tree_lower:
+        findings.append({
+            "id": "dep-1",
+            "title": "Missing dependency configuration",
+            "severity": "high",
+            "category": "architecture",
+            "status": "verified",
+            "effort": "easy",
+            "evidence": [],
+            "recommendation": "Add a requirements.txt or package.json to define dependencies."
+        })
+        
+    if "test" not in tree_lower:
+         findings.append({
+            "id": "test-1",
+            "title": "Missing test suite",
+            "severity": "high",
+            "category": "quality",
+            "status": "verified",
+            "effort": "medium",
+            "evidence": [],
+            "recommendation": "Add a tests directory and setup a test runner."
+        })
+        
+    if "license" not in tree_lower:
+        findings.append({
+            "id": "lic-1",
+            "title": "Missing LICENSE file",
+            "severity": "medium",
+            "category": "legal",
+            "status": "verified",
+            "effort": "easy",
+            "evidence": [],
+            "recommendation": "Add an open-source license."
+        })
+
+    return {
+        "mode": "repository",
+        "overview": entry.get("summary", ""),
+        "architecture": {"components": []},
+        "findings": findings,
+        "dependencies": [],
+        "documentation": "Good" if "readme.md" in tree_lower else "Missing README",
+        "action_plan": [{"priority": 1, "title": f"Address {len(findings)} findings", "effort": "medium"}],
+        "timings": {}
     }

@@ -29,7 +29,7 @@ _GENERIC_TOKENS: Set[str] = {
   "Stack", "Trace", "Traceback",
   "Windows", "Linux", "Mac", "MacOS", "Darwin",
   "Version", "Versions",
-  "Issue", "Bug", "Fix",
+  "Issue", "Bug", "Fix", "Description", "Title", "Labels", "Conduct", "Summary", "Behavior",
 }
 
 _GENERIC_LOWER: Set[str] = {t.lower() for t in _GENERIC_TOKENS}
@@ -52,6 +52,7 @@ _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 _CAMEL_RE = re.compile(r"\b[A-Z][a-zA-Z0-9]{2,}\b")
 _SNAKE_RE = re.compile(r"\b[a-z][a-z0-9]{1,}(?:_[a-z0-9]{2,})+\b")
+_FUNC_CALL_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\(\)")
 
 _DOTTED_MODULE_RE = re.compile(r"\b[a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*){1,}\b")
 
@@ -128,6 +129,10 @@ def extract_issue_entities(issue_text: str) -> List[IssueEntity]:
     fp2 = fp.strip()
     if fp2 and "://" not in fp2:
       entities.append(IssueEntity(text=fp2, kind="filepath", confidence=0.70, evidence="filepath"))
+
+  for func_sym in _FUNC_CALL_RE.findall(issue_text):
+    if not _is_generic(func_sym):
+      entities.append(IssueEntity(text=func_sym, kind="symbol", confidence=0.85, evidence="func_call"))
 
   for sym in _CAMEL_RE.findall(issue_text):
     if _is_generic(sym):

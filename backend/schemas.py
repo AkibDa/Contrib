@@ -118,3 +118,11 @@ class AskResponse(BaseModel):
   truncated: Optional[bool] = None
 
 TreeNode.model_rebuild()
+class Timings(BaseModel):
+    ingest: float = 0.0
+    embed_query: float = 0.0
+    bm25: float = 0.0
+    rerank: float = 0.0
+    prompt_build: float = 0.0
+    time_to_first_token: float = 0.0
+    total_generation: float = 0.0
