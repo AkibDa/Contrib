@@ -27,6 +27,7 @@ dist-ssr
 .venv
 
 __pycache__
+chroma_db
 
-chroma_db/
-.cache/
+backend/chroma_db/
+backend/chroma_db/**

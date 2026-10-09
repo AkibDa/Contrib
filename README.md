@@ -95,7 +95,6 @@ flowchart TD
 | Model runtime | Rerank service | `rerank_server.py` | Serves the reranking model |
 | Model runtime | Embedding service | `embed_server.py` | Serves the code embedding model |
 | External | LLM provider | n/a | Generates answers and patches |
-| External | [GitHub](https://github.com) | n/a | Source of repositories and issues (fetched via the [GitHub REST API](https://docs.github.com/en/rest)) |
 
 ## How it works
 

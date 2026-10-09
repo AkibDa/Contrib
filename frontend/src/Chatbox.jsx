@@ -3,8 +3,12 @@ import { motion } from "framer-motion";
 import {
   Send, ChevronDown, ChevronRight, FileCode, Brain,
   Search, AlertTriangle, 
-  Zap, BookOpen, GitCommit, Wrench, MessageSquare, GitBranch
+  Zap, BookOpen, GitCommit, Wrench, MessageSquare, GitBranch,
+  FolderTree
 } from "lucide-react";
+import MarkdownContent from "./MarkdownContent";
+import ProjectFileTree from "./ProjectFileTree";
+import SourcesList from "./SourcesList";
 
 
 function Badge({ label, color = "green" }) {
@@ -331,50 +335,112 @@ function IssueAnalysisCard({ data }) {
 
       
 
-function QAAnswerCard({ data }) {
+function QAAnswerCard({ data, repoUrl, repoName }) {
+  const resolvedRepoName = data?.repo_name || repoName || "Repository";
+  const resolvedRepoUrl = repoUrl || data?.repo_url || "";
+  const relevantFiles = data?.relevant_files || [];
+  const hasFiles = Array.isArray(relevantFiles) && relevantFiles.length > 0;
+  const fileCount = hasFiles ? relevantFiles.length : 0;
+
   return (
-    <div style={{
-      background: "rgba(0,10,3,0.85)",
-      border: "1px solid rgba(0,255,65,0.12)",
-      borderRadius: 4,
-      overflow: "hidden",
-    }}>
-      {/* Answer */}
-      <div style={{ padding: "14px 18px" }}>
-        <div style={{ fontSize: 10, color: "#005015", letterSpacing: 2, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
-          <MessageSquare size={11} color="#005015" />
-          ANSWER
+    <div
+      style={{
+        background: "rgba(0,10,3,0.88)",
+        border: "1px solid rgba(0,255,65,0.18)",
+        borderRadius: 4,
+        overflow: "hidden",
+        boxShadow: "0 4px 24px rgba(0,0,0,0.5), inset 0 0 30px rgba(0,255,65,0.02)",
+        width: "100%",
+      }}
+    >
+      {/* Header Banner */}
+      <div
+        style={{
+          padding: "12px 18px",
+          borderBottom: "1px solid rgba(0,255,65,0.12)",
+          background: "rgba(0,20,5,0.6)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: 10,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <MessageSquare size={13} color="#00ff41" />
+          <span
+            style={{
+              fontSize: 11,
+              color: "#00ff41",
+              letterSpacing: 1.5,
+              fontWeight: 700,
+              fontFamily: "'JetBrains Mono', monospace",
+            }}
+          >
+            DOCUMENTATION & ANALYSIS
+          </span>
         </div>
-        <p style={{
-          color: "#00dd33", 
-          fontSize: 13, lineHeight: 1.8,
-          fontFamily: "'JetBrains Mono', monospace", whiteSpace: "pre-wrap",
-        }}>
-          {data.answer}
-        </p>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 10,
+            fontFamily: "'JetBrains Mono', monospace",
+          }}
+        >
+          <span style={{ color: "#006618", letterSpacing: 1 }}>TARGET:</span>
+          <span
+            style={{
+              color: "#00dd33",
+              fontWeight: 600,
+              background: "rgba(0,255,65,0.06)",
+              border: "1px solid rgba(0,255,65,0.2)",
+              padding: "2px 7px",
+              borderRadius: 2,
+            }}
+          >
+            {resolvedRepoName}
+          </span>
+        </div>
       </div>
 
-      {/* Relevant files - Handled as simple strings instead of objects */}
-      {data.relevant_files?.length > 0 && (
-        <div style={{ padding: "0 18px 14px" }}>
-          <Accordion title={`REFERENCED FILES (${data.relevant_files.length})`} icon={FileCode}>
-            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-              {data.relevant_files.map((filePath, i) => (
-                <li key={i} style={{ 
-                  color: "#009922", 
-                  fontSize: 11, 
-                  padding: "6px 0",
-                  borderBottom: i !== data.relevant_files.length - 1 ? "1px solid rgba(0,255,65,0.05)" : "none",
-                  fontFamily: "'JetBrains Mono', monospace",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8
-                }}>
-                  <span style={{ color: "#005015" }}>&gt;</span>
-                  {filePath}
-                </li>
-              ))}
-            </ul>
+      {/* 1. Main Answer with formatted Markdown */}
+      <div style={{ padding: "18px 22px" }}>
+        <MarkdownContent content={data?.answer || "No response content available."} />
+      </div>
+
+      {/* 2. Project Structure & 3. Sources & References */}
+      {hasFiles && (
+        <div
+          style={{
+            borderTop: "1px solid rgba(0,255,65,0.12)",
+            background: "rgba(0,7,2,0.5)",
+            padding: "16px 20px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+          }}
+        >
+          {/* Section 2: Expandable Project File Tree */}
+          <Accordion
+            title={`PROJECT STRUCTURE (${fileCount} ${fileCount === 1 ? "FILE" : "FILES"})`}
+            icon={FolderTree}
+            defaultOpen={true}
+            accent={true}
+          >
+            <ProjectFileTree files={relevantFiles} repoName={resolvedRepoName} />
+          </Accordion>
+
+          {/* Section 3: Sources & References */}
+          <Accordion
+            title={`SOURCES & REFERENCES (${fileCount})`}
+            icon={FileCode}
+            defaultOpen={true}
+            accent={false}
+          >
+            <SourcesList files={relevantFiles} repoUrl={resolvedRepoUrl} />
           </Accordion>
         </div>
       )}
@@ -534,18 +600,24 @@ export default function ChatBox({ repoUrl, repoName, onReset }) {
                     overflow:"hidden"
                   }}>
                     <div className="scanline-fast" />
-                    <p style={{
-                      whiteSpace: "pre-wrap", lineHeight: 1.8,
-                      fontSize: 13, color: "#00dd33",
-                      fontFamily: "'JetBrains Mono', monospace",
-                      position:"relative", zIndex:1
+                    <div style={{
+                      position: "relative",
+                      zIndex: 1,
+                      lineHeight: 1.8,
+                      fontSize: 13,
                     }}>
-                      {msg.content}
-                    </p>
+                      <MarkdownContent content={msg.content} />
+                    </div>
                   </div>
                 )}
                 {msg.type === "issue_analysis" && <IssueAnalysisCard data={msg.data} />}
-                {msg.type === "qa_answer" && <QAAnswerCard data={msg.data} />}
+                {msg.type === "qa_answer" && (
+                  <QAAnswerCard
+                    data={msg.data}
+                    repoUrl={repoUrl}
+                    repoName={repoName}
+                  />
+                )}
               </div>
             )}
 

@@ -170,6 +170,23 @@ const globalStyles = `
     97% { transform: skewX(15deg); text-shadow: 4px 0 #ff00ff, -4px 0 #00ffff; }
     99% { transform: none; text-shadow: -2px 2px #ff00ff, 2px -2px #00ffff; }
   }
+
+  /* Highlight.js Terminal Matrix Theme */
+  .hljs-keyword, .hljs-selector-tag, .hljs-subst { color: #5eead4; font-weight: 600; }
+  .hljs-string, .hljs-regexp { color: #a7f3d0; }
+  .hljs-number, .hljs-literal { color: #facc15; }
+  .hljs-title, .hljs-title.function_, .hljs-section { color: #38bdf8; font-weight: 600; }
+  .hljs-comment, .hljs-quote { color: #00882288; font-style: italic; }
+  .hljs-variable, .hljs-attr, .hljs-template-variable { color: #34d399; }
+  .hljs-property { color: #86efac; }
+  .hljs-params { color: #cbd5e1; }
+  .hljs-type, .hljs-class .hljs-title { color: #67e8f9; }
+  .hljs-built_in, .hljs-symbol { color: #4ade80; }
+  .hljs-meta { color: #f472b6; }
+  .hljs-deletion { color: #f87171; }
+  .hljs-addition { color: #4ade80; }
+  .hljs-emphasis { font-style: italic; }
+  .hljs-strong { font-weight: bold; }
 `;
 
 const StyleTag = () => (
