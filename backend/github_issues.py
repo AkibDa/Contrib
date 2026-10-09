@@ -382,7 +382,8 @@ Return exactly JSON format:
 """
     try:
         import json
-        if "ollama" in settings.llm.__class__.__name__.lower():
+        from llama_index.core import Settings
+        if "ollama" in Settings.llm.__class__.__name__.lower():
             schema = {
                 "type": "object",
                 "properties": {
@@ -390,10 +391,10 @@ Return exactly JSON format:
                     "reasons": {"type": "array", "items": {"type": "string"}}
                 }
             }
-            resp = settings.llm.complete(prompt, format=schema, temperature=0.1)
+            resp = Settings.llm.complete(prompt, format=schema, temperature=0.1)
             parsed = json.loads(str(resp).strip())
         else:
-            resp = settings.llm.complete(prompt, temperature=0.1)
+            resp = Settings.llm.complete(prompt, temperature=0.1)
             from services import extract_json
             parsed = extract_json(str(resp))
             
