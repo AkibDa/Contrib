@@ -88,6 +88,28 @@ if settings.is_production:
     )
     logger.info(f"LLM URL: {settings.llm_base_url}")
 
+elif settings.remote_llm_base_url:
+    logger.info("Using Authenticated Remote LLM (ngrok)")
+    headers = {}
+    if settings.remote_llm_auth_secret:
+        headers["Authorization"] = f"Bearer {settings.remote_llm_auth_secret}"
+    Settings.llm = OpenAILike(
+      model=settings.remote_llm_model,
+      api_base=settings.remote_llm_base_url,
+      api_key=settings.remote_llm_auth_secret or "dummy-key",
+      context_window=32768,
+      is_chat_model=True,
+      tokenizer=None,
+      request_timeout=float(settings.llm_timeout),
+      max_tokens=2048,
+      temperature=0.0,
+      default_headers=headers,
+      additional_kwargs={
+        "stop": ["```"]
+      },
+    )
+    logger.info(f"Remote LLM URL: {settings.remote_llm_base_url}")
+
 else:
     logger.info("Using Local Ollama Inference")
 
