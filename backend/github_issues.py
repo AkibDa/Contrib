@@ -6,12 +6,12 @@ import logging
 import asyncio
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple, Any
-from cachetools import TTLCache
+import time
 
 logger = logging.getLogger(__name__)
 
-# Cache: repo_url -> {"etag": str, "issues": list, "truncated": bool, "rate_limit": dict, "message": str}
-_issues_cache = TTLCache(maxsize=100, ttl=600)
+# Cache: repo_url -> {"etag": str, "issues": list, "truncated": bool, "rate_limit": dict, "message": str, "expires_at": float}
+_issues_cache: Dict[str, dict] = {}
 
 def normalize_repo_url(url: str) -> str:
     url = url.rstrip("/")
@@ -33,7 +33,11 @@ async def fetch_open_issues(repo_url: str, max_issues: int = 200, state: str = "
         raise ValueError(f"Invalid GitHub URL: {repo_url}")
     
     owner, repo = parsed
+    
     cached = _issues_cache.get(url_norm)
+    if cached and time.time() > cached.get("expires_at", 0):
+        del _issues_cache[url_norm]
+        cached = None
     
     headers = {
         "Accept": "application/vnd.github.v3+json",
@@ -107,10 +111,20 @@ async def fetch_open_issues(repo_url: str, max_issues: int = 200, state: str = "
         "issues": issues,
         "truncated": truncated,
         "rate_limit": rate_limit,
-        "etag": current_etag
+        "etag": current_etag,
+        "expires_at": time.time() + 600
     }
     _issues_cache[url_norm] = result
     return result
+
+def get_cached_issue(repo_url: str, issue_number: int) -> Optional[dict]:
+    url_norm = normalize_repo_url(repo_url)
+    cached = _issues_cache.get(url_norm)
+    if cached and "issues" in cached:
+        for issue in cached["issues"]:
+            if str(issue.get("number")) == str(issue_number):
+                return issue
+    return None
 
 def strip_boilerplate(text: str) -> str:
     if not text:
@@ -177,6 +191,14 @@ def fast_score_issue(issue: dict, likely_files: list) -> Tuple[int, dict]:
         signals["top_score"] = top_score
         score += min(10, top_score * 10)
         
+        # Penalize for complex/large functions
+        func_comp = likely_files[0].get("func_complexity", 1)
+        func_size = likely_files[0].get("func_size", 0)
+        if func_comp > 10 or func_size > 50:
+            score -= 20
+        elif func_comp > 5 or func_size > 20:
+            score -= 10
+            
     # Comment count, assignee, age
     comments = issue.get("comments", 0)
     has_assignee = bool(issue.get("assignees") or issue.get("assignee"))
