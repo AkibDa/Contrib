@@ -2,7 +2,7 @@ import asyncio
 import sys
 
 if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+  asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 settings.validate()
 
 logger.info(
-  "Starting FirstPR  env=%s  llm=%s  embed=%s",
+  "Starting Contrib  env=%s  llm=%s  embed=%s",
   settings.app_env,
   settings.llm_model,
   settings.embed_model,
@@ -61,7 +61,7 @@ async def rate_limit_handler(request, exc):
 @limiter.limit("5/minute")
 def root(request: Request,):
   return {
-    "message": "Welcome to FirstPR API",
+    "message": "Welcome to Contrib API",
     "env":     settings.app_env,
     "llm":     settings.llm_model,
   }
