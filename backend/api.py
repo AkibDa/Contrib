@@ -367,6 +367,42 @@ async def _streamed_pipeline(issue_full: str, pipeline_coro_factory) -> AsyncGen
     except Exception as exc:
         yield json.dumps({"status": "error", "detail": repr(exc)}) + "\n"
 
+@router.get("/repo-tree")
+@limiter.limit("5/minute")
+async def get_repo_tree(request: Request, repo_url: str):
+    cache_key = repo_url.rstrip("/")
+    if cache_key not in repo_cache:
+        raise HTTPException(400, "Repository not loaded.")
+    return {"project_structure": repo_cache[cache_key]["engine_bundle"].get("project_structure", [])}
+
+@router.get("/file")
+@limiter.limit("30/minute")
+async def get_file(request: Request, repo_url: str, path: str):
+    cache_key = repo_url.rstrip("/")
+    if cache_key not in repo_cache:
+        raise HTTPException(400, "Repository not loaded.")
+    sources = repo_cache[cache_key]["engine_bundle"]["sources"]
+    
+    # Path traversal protection
+    path = path.replace("\\", "/")
+    if ".." in path or path.startswith("/"):
+        raise HTTPException(400, "Invalid path")
+        
+    if path not in sources:
+        raise HTTPException(404, "File not found in indexed set")
+        
+    content = sources[path]
+    if len(content) > 200 * 1024:
+        raise HTTPException(400, "File too large")
+        
+    ext = path.split(".")[-1] if "." in path else ""
+    return {
+        "path": path,
+        "language": ext,
+        "content": content,
+        "line_count": content.count("\n") + 1
+    }
+
 @router.post("/ask")
 @limiter.limit("30/minute")
 async def ask_repo(request: Request,req: RepoQARequest):
@@ -385,12 +421,16 @@ async def ask_repo(request: Request,req: RepoQARequest):
     engine_bundle = entry["engine_bundle"]
 
     qa_result = await asyncio.to_thread(run_repo_qa, engine_bundle, req.question)
-
+    
     return {
         "repo_name":      get_repo_name(req.repo_url),
         "question":       req.question,
         "answer":         qa_result["answer"],
         "relevant_files": qa_result["relevant_files"],
+        "project_structure": qa_result.get("project_structure", []),
+        "sections": qa_result.get("sections", []),
+        "citations": qa_result.get("citations", []),
+        "truncated": qa_result.get("truncated", False)
     }
 
 @router.get("/repo-status")

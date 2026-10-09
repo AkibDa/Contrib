@@ -639,13 +639,59 @@ def build_query_engine(content: str, repo_name: str) -> dict:
 
     bm25 = BM25Okapi(bm25_corpus) if bm25_corpus else None
 
+    project_structure, truncated = build_project_tree(sources)
     return {
+        "project_structure": project_structure,
+        "truncated": truncated,
         "vector_index":    index,
         "bm25":            bm25,
         "bm25_nodes":      bm25_nodes,
         "sources":         sources,
         "file_priorities": file_priorities,
     }
+
+
+def build_project_tree(sources: Dict[str, str], max_depth: int = 6, max_nodes: int = 2000) -> Tuple[List[dict], bool]:
+    tree = {}
+    node_count = 0
+    truncated = False
+    
+    for path in sources.keys():
+        parts = path.replace("\\", "/").split('/')
+        current = tree
+        for i, part in enumerate(parts):
+            if i >= max_depth:
+                truncated = True
+                break
+            if part not in current:
+                if node_count >= max_nodes:
+                    truncated = True
+                    break
+                current[part] = {"_type": "file" if i == len(parts)-1 else "dir", "_children": {}}
+                node_count += 1
+            current = current[part]["_children"]
+            
+    def format_tree(node_dict, current_path=""):
+        result = []
+        for name, data in sorted(node_dict.items(), key=lambda x: (x[1]["_type"] == "file", x[0])):
+            path = f"{current_path}/{name}".lstrip("/")
+            node = {"name": name, "path": path, "type": data["_type"]}
+            if data["_type"] == "dir":
+                node["children"] = format_tree(data["_children"], path)
+            result.append(node)
+        return result
+        
+    return format_tree(tree), truncated
+
+def validate_paths(paths: List[str], sources: Dict[str, str]) -> List[str]:
+    valid = []
+    seen = set()
+    for p in paths:
+        norm = p.replace("\\", "/").lstrip("/")
+        if norm in sources and norm not in seen:
+            valid.append(norm)
+            seen.add(norm)
+    return valid
 
 def extract_json(text: str) -> dict:
     """Safely extract the first JSON object from an LLM response."""
