@@ -10,26 +10,26 @@ from dataclasses import dataclass, field
 
 
 def _env(key: str, default: str = "") -> str:
-    return os.environ.get(key, default).strip()
+  return os.environ.get(key, default).strip()
 
 
 def _env_int(key: str, default: int) -> int:
-    try:
-        return int(os.environ.get(key, default))
-    except (TypeError, ValueError):
-        return default
+  try:
+    return int(os.environ.get(key, default))
+  except (TypeError, ValueError):
+    return default
 
 
 @dataclass(frozen=True)
 class Settings:
     app_env: str = field(
-        default_factory=lambda: _env("APP_ENV", "development").lower()
+      default_factory=lambda: _env("APP_ENV", "development").lower()
     )
 
     vllm_base_url: str   = field(default_factory=lambda: _env("VLLM_BASE_URL"))
     cloud_llm_model: str = field(
         default_factory=lambda: _env(
-            "CLOUD_LLM_MODEL", "Qwen/Qwen2.5-Coder-7B-Instruct"
+          "CLOUD_LLM_MODEL", "Qwen/Qwen2.5-Coder-7B-Instruct"
         )
     )
     ollama_base_url: str = field(

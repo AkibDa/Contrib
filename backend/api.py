@@ -17,12 +17,12 @@ from schemas import AnalyzeRequest, RepoLoadRequest, RepoQARequest
 from utils import validate_github_url, get_repo_name, fetch_github_issue
 from gitingest import ingest_async
 from services import (
-    repo_cache,
-    build_query_engine_async,
-    run_issue_analyzer,
-    run_retrieval_agent,
-    run_reasoning_agent,
-    run_repo_qa,
+  repo_cache,
+  build_query_engine_async,
+  run_issue_analyzer,
+  run_retrieval_agent,
+  run_reasoning_agent,
+  run_repo_qa,
 )
 from limiter import limiter
 
@@ -32,20 +32,20 @@ router = APIRouter(prefix="/api")
 _indexing_in_progress: dict[str, asyncio.Event] = {}
 
 async def _stream_status(steps: list[tuple[str, any]]) -> AsyncGenerator[str, None]:
-    """
-    Yield newline-delimited JSON status events for SSE / chunked streaming.
+  """
+  Yield newline-delimited JSON status events for SSE / chunked streaming.
 
-    Each step is a (status_label, coroutine_or_value) tuple.  The coroutine is
-    awaited and its result is sent in the final ``done`` event.
-    """
-    for label, coro in steps:
-        yield json.dumps({"status": label}) + "\n"
-        await asyncio.sleep(0)
-        if asyncio.iscoroutine(coro):
-            result = await coro
-        else:
-            result = coro
-    yield json.dumps({"status": "done", "result": result}) + "\n"
+  Each step is a (status_label, coroutine_or_value) tuple.  The coroutine is
+  awaited and its result is sent in the final ``done`` event.
+  """
+  for label, coro in steps:
+    yield json.dumps({"status": label}) + "\n"
+    await asyncio.sleep(0)
+    if asyncio.iscoroutine(coro):
+      result = await coro
+    else:
+      result = coro
+  yield json.dumps({"status": "done", "result": result}) + "\n"
 
 async def check_repo_size(repo_url: str, max_mb: int = 500) -> bool:
   """Check the GitHub API to ensure the repo isn't too massive to process."""
@@ -76,92 +76,92 @@ async def check_repo_size(repo_url: str, max_mb: int = 500) -> bool:
 @router.post("/load-repo")
 @limiter.limit("5/minute")
 async def load_repo(request: Request, req: RepoLoadRequest):
-    """
-    Clone and index a GitHub repository.
+  """
+  Clone and index a GitHub repository.
 
-    Behaviour:
-    - Already in memory → returns immediately as ``"cached"``.
-    - Currently being indexed by another request → waits for it to finish.
-    - ChromaDB collection exists but not in memory → reloads without cloning.
-    - Fresh repo → clones, ingests, indexes asynchronously.
+  Behaviour:
+  - Already in memory → returns immediately as ``"cached"``.
+  - Currently being indexed by another request → waits for it to finish.
+  - ChromaDB collection exists but not in memory → reloads without cloning.
+  - Fresh repo → clones, ingests, indexes asynchronously.
 
-    Returns progressive JSON status events as a streaming response so the
-    frontend can show live progress feedback.
-    """
-    if not validate_github_url(req.repo_url):
-        raise HTTPException(400, "Invalid GitHub URL")
+  Returns progressive JSON status events as a streaming response so the
+  frontend can show live progress feedback.
+  """
+  if not validate_github_url(req.repo_url):
+    raise HTTPException(400, "Invalid GitHub URL")
 
-    await check_repo_size(req.repo_url, max_mb=300)
+  await check_repo_size(req.repo_url, max_mb=300)
 
-    cache_key = req.repo_url.rstrip("/")
-    repo_name = get_repo_name(req.repo_url)
+  cache_key = req.repo_url.rstrip("/")
+  repo_name = get_repo_name(req.repo_url)
 
+  if cache_key in repo_cache:
+    entry = repo_cache[cache_key]
+    return {
+      "status":    "cached",
+      "repo_name": repo_name,
+      "summary":   entry["summary"],
+      "tree":      entry["tree"],
+    }
+
+  if cache_key in _indexing_in_progress:
+    logger.info(f"Waiting for in-progress indexing of {cache_key} …")
+    await _indexing_in_progress[cache_key].wait()
     if cache_key in repo_cache:
-        entry = repo_cache[cache_key]
-        return {
-            "status":    "cached",
-            "repo_name": repo_name,
-            "summary":   entry["summary"],
-            "tree":      entry["tree"],
-        }
+      entry = repo_cache[cache_key]
+      return {
+        "status":    "cached",
+        "repo_name": repo_name,
+        "summary":   entry["summary"],
+        "tree":      entry["tree"],
+      }
+    raise HTTPException(500, "Indexing finished but repo not found in cache.")
 
-    if cache_key in _indexing_in_progress:
-        logger.info(f"Waiting for in-progress indexing of {cache_key} …")
-        await _indexing_in_progress[cache_key].wait()
-        if cache_key in repo_cache:
-            entry = repo_cache[cache_key]
-            return {
-                "status":    "cached",
-                "repo_name": repo_name,
-                "summary":   entry["summary"],
-                "tree":      entry["tree"],
-            }
-        raise HTTPException(500, "Indexing finished but repo not found in cache.")
+  done_event = asyncio.Event()
+  _indexing_in_progress[cache_key] = done_event
 
-    done_event = asyncio.Event()
-    _indexing_in_progress[cache_key] = done_event
+  async def _do_index() -> dict:
+    try:
+      with tempfile.TemporaryDirectory() as tmp_dir:
+        repo_path = os.path.join(tmp_dir, "cloned_repo")
+        logger.info(f"Cloning {req.repo_url} …")
 
-    async def _do_index() -> dict:
-        try:
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                repo_path = os.path.join(tmp_dir, "cloned_repo")
-                logger.info(f"Cloning {req.repo_url} …")
+        process = await asyncio.to_thread(
+          subprocess.run,
+          ["git", "clone", "--depth=1", req.repo_url, repo_path],
+          capture_output=True,
+          text=True,
+        )
 
-                process = await asyncio.to_thread(
-                    subprocess.run,
-                    ["git", "clone", "--depth=1", req.repo_url, repo_path],
-                    capture_output=True,
-                    text=True,
-                )
+        if process.returncode != 0:
+          raise RuntimeError(f"Git clone failed: {process.stderr.strip()}")
 
-                if process.returncode != 0:
-                    raise RuntimeError(f"Git clone failed: {process.stderr.strip()}")
+        logger.info("Clone done. Ingesting …")
+        summary, tree, content = await ingest_async(repo_path)
 
-                logger.info("Clone done. Ingesting …")
-                summary, tree, content = await ingest_async(repo_path)
+      logger.info("Building index …")
+      engine_bundle = await build_query_engine_async(content, repo_name)
 
-            logger.info("Building index …")
-            engine_bundle = await build_query_engine_async(content, repo_name)
+      repo_cache[cache_key] = {
+        "summary":       summary,
+        "tree":          tree,
+        "engine_bundle": engine_bundle,
+      }
+      return {"status": "loaded", "repo_name": repo_name, "summary": summary, "tree": tree}
 
-            repo_cache[cache_key] = {
-                "summary":       summary,
-                "tree":          tree,
-                "engine_bundle": engine_bundle,
-            }
-            return {"status": "loaded", "repo_name": repo_name, "summary": summary, "tree": tree}
+    except Exception as exc:
+      logger.exception("FULL INGESTION TRACEBACK")
+      traceback.print_exc()
+      raise exc
+    finally:
+      done_event.set()
+      _indexing_in_progress.pop(cache_key, None)
 
-        except Exception as exc:
-            logger.exception("FULL INGESTION TRACEBACK")
-            traceback.print_exc()
-            raise exc
-        finally:
-            done_event.set()
-            _indexing_in_progress.pop(cache_key, None)
-
-    return StreamingResponse(
-        _progressive_load(cache_key, repo_name, _do_index),
-        media_type="application/x-ndjson",
-    )
+  return StreamingResponse(
+    _progressive_load(cache_key, repo_name, _do_index),
+    media_type="application/x-ndjson",
+  )
 
 async def _progressive_load(
     cache_key: str,
