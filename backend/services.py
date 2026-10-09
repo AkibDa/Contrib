@@ -1596,8 +1596,11 @@ Start your "explanation" with exactly: {uncertainty_note}
         return result
 
     try:
-        response_format = {"type": "json_object"}
-        resp   = str(Settings.llm.complete(prompt, response_format=response_format))
+        if "ollama" in Settings.llm.__class__.__name__.lower():
+            resp = str(Settings.llm.complete(prompt, format="json"))
+        else:
+            response_format = {"type": "json_object"}
+            resp = str(Settings.llm.complete(prompt, response_format=response_format))
         result = extract_json(resp)
 
         if not result:
