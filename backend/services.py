@@ -19,6 +19,19 @@ from llama_index.core import VectorStoreIndex, StorageContext
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.schema import NodeWithScore
 
+_original_get = HuggingFaceEmbedding._get_text_embeddings
+
+def _sorted_get_text_embeddings(self, texts: List[str]) -> List[List[float]]:
+    indexed = list(enumerate(texts))
+    indexed.sort(key=lambda x: len(x[1]))
+    sorted_texts = [x[1] for x in indexed]
+    sorted_embeds = _original_get(self, sorted_texts)
+    restored = [None] * len(texts)
+    for i, (orig_idx, _) in enumerate(indexed):
+        restored[orig_idx] = sorted_embeds[i]
+    return restored
+
+HuggingFaceEmbedding._get_text_embeddings = _sorted_get_text_embeddings
 import chromadb
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
@@ -41,11 +54,13 @@ CHROMA_DIR = Path("./chroma_db")
 CHROMA_DIR.mkdir(exist_ok=True)
 _chroma_client = chromadb.PersistentClient(path=str(CHROMA_DIR))
 
-device = (
-    "cuda" if torch.cuda.is_available()
-    else "mps" if torch.backends.mps.is_available()
-    else "cpu"
-)
+device = settings.embed_device
+if not device:
+    device = (
+        "mps" if torch.backends.mps.is_available()
+        else "cuda" if torch.cuda.is_available()
+        else "cpu"
+    )
 
 if settings.is_production:
     logger.info("Using Remote Embedding Server")
@@ -68,6 +83,8 @@ else:
         device=device,
         embed_batch_size=settings.embed_batch_size,
     )
+    if hasattr(Settings.embed_model, "_model"):
+        Settings.embed_model._model.max_seq_length = settings.embed_max_seq_len
 
 if settings.is_production:
     logger.info("Using Remote AMD GPU vLLM Inference")
@@ -521,6 +538,7 @@ def _split_repo_content(content: str) -> List[Tuple[str, str]]:
     parts = re.split(r"={48}\n(?:File|FILE|file):\s*", content)
 
     raw_files: List[Tuple[str, str]] = []
+    skipped_reasons = {}
     for part in parts:
         if not part.strip() or "Directory structure:" in part:
             continue
@@ -529,8 +547,34 @@ def _split_repo_content(content: str) -> List[Tuple[str, str]]:
             fp, code = subparts[0].strip(), subparts[1].strip()
             if not fp or not code:
                 continue
-            if _should_skip_file(fp):
+                
+            fp_lower = fp.lower().replace("\\", "/")
+            path_parts = fp_lower.split("/")
+            
+            skip_reason = ""
+            if len(code.encode('utf-8')) > settings.max_file_kb * 1024:
+                skip_reason = f"over_{settings.max_file_kb}kb"
+            elif any(p in _IGNORE_DIRS for p in path_parts[:-1]):
+                skip_reason = "ignored_dir"
+            else:
+                for ext in _IGNORE_EXTS:
+                    if fp_lower.endswith(ext):
+                        if fp_lower.endswith(".md") and "readme" in fp_lower:
+                            break
+                        if fp_lower.endswith((".yaml", ".yml", ".toml", ".ini", ".cfg", ".env")):
+                            break
+                        skip_reason = f"ext_{ext}"
+                        break
+                
+                if not skip_reason:
+                    basename = path_parts[-1]
+                    if any(basename.startswith(pat.lower()) for pat in _IGNORE_NAME_PATTERNS):
+                        skip_reason = "ignored_name"
+            
+            if skip_reason:
+                skipped_reasons[skip_reason] = skipped_reasons.get(skip_reason, 0) + 1
                 continue
+                
             raw_files.append((fp, code))
 
     raw_files.sort(key=lambda x: _file_priority(x[0]))
@@ -540,6 +584,8 @@ def _split_repo_content(content: str) -> List[Tuple[str, str]]:
         f"File filter: {len(parts)} raw parts → {len(raw_files)} after filtering "
         f"→ {len(files)} after cap (max {_MAX_EMBED_FILES})"
     )
+    if skipped_reasons:
+        logger.info(f"Skipped files breakdown: {skipped_reasons}")
     return files
 
 
@@ -564,10 +610,10 @@ def _make_splitter(source_len: int) -> SentenceSplitter:
     with redundant chunks while small files are kept whole.
     """
     if source_len > _LARGE_FILE_THRESHOLD:
-        return SentenceSplitter(chunk_size=512, chunk_overlap=64)
-    return SentenceSplitter(chunk_size=1024, chunk_overlap=128)
+        return SentenceSplitter(chunk_size=settings.chunk_size // 2, chunk_overlap=settings.chunk_overlap // 2)
+    return SentenceSplitter(chunk_size=settings.chunk_size, chunk_overlap=settings.chunk_overlap)
 
-def build_query_engine(content: str, repo_name: str) -> dict:
+def build_query_engine(content: str, repo_name: str, commit_sha: str = "") -> dict:
     """
     Build (or reload) a persistent vector index for *repo_name*.
 
@@ -578,19 +624,30 @@ def build_query_engine(content: str, repo_name: str) -> dict:
         ``sources``        – Dict[file_path, source_code]
         ``file_priorities``– Dict[file_path, int] for reranking
     """
-    repo_hash = hashlib.md5(repo_name.encode()).hexdigest()[:8]
-    safe_name = f"{repo_name}_{repo_hash}"
+    embed_model_name = getattr(Settings.embed_model, "model_name", "default")
+    config_str = f"{repo_name}_{commit_sha}_{embed_model_name}_{settings.chunk_size}_{settings.chunk_overlap}"
+    repo_hash = hashlib.md5(config_str.encode()).hexdigest()[:16]
+    safe_name = f"idx_{repo_hash}"
 
-    collection      = _chroma_client.get_or_create_collection(safe_name)
+    collection = _chroma_client.get_or_create_collection(safe_name)
+    metadata = collection.metadata or {}
+    is_complete = metadata.get("status") == "complete"
+    
+    if not is_complete and collection.count() > 0:
+        _chroma_client.delete_collection(safe_name)
+        collection = _chroma_client.create_collection(safe_name)
+        
     vector_store    = ChromaVectorStore(chroma_collection=collection)
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
-    t0    = time.perf_counter()
+    t0 = time.perf_counter()
     files = _split_repo_content(content)
+    t_filter = time.perf_counter() - t0
+    
     sources          = {fp: src for fp, src in files}
     file_priorities  = {fp: _file_priority(fp) for fp, _ in files}
 
-    if collection.count() > 0:
+    if is_complete and collection.count() > 0:
         logger.info(
             f"Reusing Chroma collection '{safe_name}' "
             f"({collection.count()} chunks) — skipping embedding."
@@ -599,7 +656,19 @@ def build_query_engine(content: str, repo_name: str) -> dict:
             vector_store, storage_context=storage_context
         )
     else:
+        # Measure config
+        device = getattr(Settings.embed_model, "_device", getattr(Settings.embed_model, "device", "unknown"))
+        model_name = getattr(Settings.embed_model, "model_name", "unknown")
+        batch_size = getattr(Settings.embed_model, "embed_batch_size", 0)
+        seq_len = "unknown"
+        if hasattr(Settings.embed_model, "_model") and hasattr(Settings.embed_model._model, "max_seq_length"):
+            seq_len = Settings.embed_model._model.max_seq_length
+            
         logger.info(f"Building '{safe_name}' — embedding {len(files)} files…")
+        logger.info(f"EMBED SETTINGS: Model={model_name}, Device={device}, BatchSize={batch_size}, MaxSeqLen={seq_len}")
+        
+        
+        t0 = time.perf_counter()
         docs = []
         for fp, src in files:
             meta = _rich_metadata(fp, src)
@@ -615,20 +684,28 @@ def build_query_engine(content: str, repo_name: str) -> dict:
 
         all_nodes = []
         if small_docs:
-            small_splitter = SentenceSplitter(chunk_size=1024, chunk_overlap=128)
+            small_splitter = SentenceSplitter(chunk_size=settings.chunk_size, chunk_overlap=settings.chunk_overlap)
             all_nodes.extend(small_splitter.get_nodes_from_documents(small_docs))
         if large_docs:
-            large_splitter = SentenceSplitter(chunk_size=512, chunk_overlap=64)
+            large_splitter = SentenceSplitter(chunk_size=settings.chunk_size // 2, chunk_overlap=settings.chunk_overlap // 2)
             all_nodes.extend(large_splitter.get_nodes_from_documents(large_docs))
+            
+        t_chunking = time.perf_counter() - t0
 
+        t0 = time.perf_counter()
         index = VectorStoreIndex(
             nodes=all_nodes,
             storage_context=storage_context,
             show_progress=True,
         )
+        t_embed_and_write = time.perf_counter() - t0
+        
+        collection.modify(metadata={**(collection.metadata or {}), "status": "complete"})
+        
         logger.info(
-            f"Index built in {time.perf_counter() - t0:.1f}s — "
-            f"{len(all_nodes)} chunks from {len(files)} files."
+            f"Index built in {t_filter + t_chunking + t_embed_and_write:.1f}s — "
+            f"{len(all_nodes)} chunks from {len(files)} files. "
+            f"[Filter: {t_filter:.2f}s, Chunk: {t_chunking:.2f}s, Embed+Write: {t_embed_and_write:.2f}s]"
         )
 
     bm25_corpus, bm25_nodes = [], []
@@ -816,9 +893,11 @@ def run_retrieval_agent(engine_bundle: dict, issue_full: str) -> dict:
   candidates: Dict[str, Tuple[float, str]] = {}
 
   try:
-    retriever = vector_index.as_retriever(similarity_top_k=30)
-
-    nodes: List[NodeWithScore] = retriever.retrieve(expanded_issue)
+    if vector_index:
+        retriever = vector_index.as_retriever(similarity_top_k=30)
+        nodes: List[NodeWithScore] = retriever.retrieve(expanded_issue)
+    else:
+        nodes = []
 
     for node in nodes:
       fp = node.metadata.get("file_path", "")
@@ -1740,12 +1819,12 @@ Format your answer as a JSON object with:
         "timings": timings,
     }
 
-async def build_query_engine_async(content: str, repo_name: str) -> dict:
+async def build_query_engine_async(content: str, repo_name: str, commit_sha: str = "") -> dict:
     """
     Run build_query_engine in a thread pool so the FastAPI event loop stays
     responsive during the CPU/GPU-heavy embedding phase.
     """
-    return await asyncio.to_thread(build_query_engine, content, repo_name)
+    return await asyncio.to_thread(build_query_engine, content, repo_name, commit_sha)
 def compute_complexity_factors(sources: dict, fix_zone: dict) -> dict:
     factors = {
         "files_touched": 1,
@@ -1775,3 +1854,114 @@ def compute_complexity_factors(sources: dict, fix_zone: dict) -> dict:
             pass
             
     return factors
+
+import asyncio
+
+async def build_query_engine_progressive(content: str, repo_name: str, commit_sha: str = ""):
+    embed_model_name = getattr(Settings.embed_model, "model_name", "default")
+    config_str = f"{repo_name}_{commit_sha}_{embed_model_name}_{settings.chunk_size}_{settings.chunk_overlap}"
+    repo_hash = hashlib.md5(config_str.encode()).hexdigest()[:16]
+    safe_name = f"idx_{repo_hash}"
+
+    collection = _chroma_client.get_or_create_collection(safe_name)
+    metadata = collection.metadata or {}
+    is_complete = metadata.get("status") == "complete"
+    
+    if not is_complete and collection.count() > 0:
+        _chroma_client.delete_collection(safe_name)
+        collection = _chroma_client.create_collection(safe_name)
+        
+    vector_store = ChromaVectorStore(chroma_collection=collection)
+    storage_context = StorageContext.from_defaults(vector_store=vector_store)
+
+    t0 = time.perf_counter()
+    files = await asyncio.to_thread(_split_repo_content, content)
+    t_filter = time.perf_counter() - t0
+    
+    sources = {fp: src for fp, src in files}
+    file_priorities = {fp: _file_priority(fp) for fp, _ in files}
+
+    # BM25 build
+    bm25_corpus, bm25_nodes = [], []
+    for fp, src in files:
+        tokens = re.findall(r"[a-zA-Z_]\w*", src)
+        bm25_corpus.append(tokens)
+        bm25_nodes.append({"file_path": fp, "text": src[:4_000]})
+
+    bm25 = BM25Okapi(bm25_corpus) if bm25_corpus else None
+    
+    bundle = {
+        "vector_index": None,
+        "bm25": bm25,
+        "bm25_nodes": bm25_nodes,
+        "sources": sources,
+        "file_priorities": file_priorities,
+        "is_embedding": not is_complete
+    }
+    
+    yield {"status": "bm25_ready", "bundle": bundle}
+
+    if is_complete and collection.count() > 0:
+        logger.info(f"Reusing Chroma collection '{safe_name}'...")
+        index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage_context)
+        bundle["vector_index"] = index
+        bundle["is_embedding"] = False
+        yield {"status": "ready", "bundle": bundle}
+        return
+
+    # Background embedding
+    logger.info(f"Building '{safe_name}'...")
+    
+    def _prepare_nodes():
+        docs = []
+        for fp, src in files:
+            meta = _rich_metadata(fp, src)
+            docs.append(Document(
+                text=src,
+                metadata=meta,
+                excluded_embed_metadata_keys=["functions", "classes", "imports", "priority"],
+                excluded_llm_metadata_keys=["functions", "classes", "imports", "priority"],
+            ))
+        small_docs = [d for d in docs if len(d.text) <= _LARGE_FILE_THRESHOLD]
+        large_docs = [d for d in docs if len(d.text) > _LARGE_FILE_THRESHOLD]
+        all_nodes = []
+        if small_docs:
+            small_splitter = SentenceSplitter(chunk_size=settings.chunk_size, chunk_overlap=settings.chunk_overlap)
+            all_nodes.extend(small_splitter.get_nodes_from_documents(small_docs))
+        if large_docs:
+            large_splitter = SentenceSplitter(chunk_size=settings.chunk_size // 2, chunk_overlap=settings.chunk_overlap // 2)
+            all_nodes.extend(large_splitter.get_nodes_from_documents(large_docs))
+        return all_nodes
+        
+    all_nodes = await asyncio.to_thread(_prepare_nodes)
+    
+    total = len(all_nodes)
+    done = 0
+    
+    # We will embed in batches and yield progress
+    batch_size = 32
+    
+    def _embed_batch(batch):
+        # We can use index.insert_nodes which does embedding and writing
+        # Wait, if we create an empty VectorStoreIndex:
+        idx = VectorStoreIndex([], storage_context=storage_context)
+        idx.insert_nodes(batch)
+        return idx
+        
+    index = VectorStoreIndex([], storage_context=storage_context)
+    
+    start_time = time.time()
+    for i in range(0, total, batch_size):
+        batch = all_nodes[i:i+batch_size]
+        await asyncio.to_thread(index.insert_nodes, batch)
+        done += len(batch)
+        percent = int(done * 100 / total)
+        elapsed = time.time() - start_time
+        eta = int((elapsed / done) * (total - done)) if done > 0 else 0
+        yield {"status": "embedding_progress", "done": done, "total": total, "percent": percent, "eta_seconds": eta}
+        
+    collection.modify(metadata={**(collection.metadata or {}), "status": "complete"})
+    bundle["vector_index"] = index
+    bundle["is_embedding"] = False
+    yield {"status": "ready", "bundle": bundle}
+

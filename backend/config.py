@@ -76,6 +76,21 @@ class Settings:
   embed_batch_size: int = field(
     default_factory=lambda: _env_int("EMBED_BATCH_SIZE", 32)
   )
+  embed_max_seq_len: int = field(
+    default_factory=lambda: _env_int("EMBED_MAX_SEQ_LEN", 512)
+  )
+  embed_device: str = field(
+    default_factory=lambda: _env("EMBED_DEVICE", "")
+  )
+  max_file_kb: int = field(
+    default_factory=lambda: _env_int("MAX_FILE_KB", 100)
+  )
+  chunk_size: int = field(
+    default_factory=lambda: _env_int("CHUNK_SIZE", 1024)
+  )
+  chunk_overlap: int = field(
+    default_factory=lambda: _env_int("CHUNK_OVERLAP", 128)
+  )
   max_repo_mb: int      = field(
     default_factory=lambda: _env_int("MAX_REPO_MB", 300)
   )
@@ -113,7 +128,7 @@ class Settings:
     ]
     if missing:
       raise ValueError(
-        f"[FirstPR] Production mode requires: {', '.join(missing)}"
+        f"[Contrib] Production mode requires: {', '.join(missing)}"
       )
 
 

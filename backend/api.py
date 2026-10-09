@@ -121,11 +121,14 @@ async def load_repo(request: Request, req: RepoLoadRequest):
   done_event = asyncio.Event()
   _indexing_in_progress[cache_key] = done_event
 
-  async def _do_index() -> dict:
+  
+  async def _do_index():
     try:
+      import time
       with tempfile.TemporaryDirectory() as tmp_dir:
         repo_path = os.path.join(tmp_dir, "cloned_repo")
-        logger.info(f"Cloning {req.repo_url} …")
+        yield {"status": "cloning", "repo_url": req.repo_url}
+        t_clone_start = time.perf_counter()
 
         process = await asyncio.to_thread(
           subprocess.run,
@@ -133,23 +136,42 @@ async def load_repo(request: Request, req: RepoLoadRequest):
           capture_output=True,
           text=True,
         )
+        t_clone = time.perf_counter() - t_clone_start
 
         if process.returncode != 0:
           raise RuntimeError(f"Git clone failed: {process.stderr.strip()}")
+          
+        sha_process = await asyncio.to_thread(
+            subprocess.run,
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True
+        )
+        commit_sha = sha_process.stdout.strip()
 
-        logger.info("Clone done. Ingesting …")
+        yield {"status": "ingesting", "clone_time": t_clone}
+        t_ingest_start = time.perf_counter()
         summary, tree, content = await ingest_async(repo_path)
+        t_ingest = time.perf_counter() - t_ingest_start
 
-      logger.info("Building index …")
-      engine_bundle = await build_query_engine_async(content, repo_name)
-
-      repo_cache[cache_key] = {
-        "summary":       summary,
-        "tree":          tree,
-        "engine_bundle": engine_bundle,
-      }
-      return {"status": "loaded", "repo_name": repo_name, "summary": summary, "tree": tree}
-
+      from services import build_query_engine_progressive
+      async for event in build_query_engine_progressive(content, repo_name, commit_sha):
+          if event["status"] == "bm25_ready":
+              engine_bundle = event["bundle"]
+              # We can cache the partial bundle
+              repo_cache[cache_key] = {
+                  "summary": summary,
+                  "tree": tree,
+                  "engine_bundle": engine_bundle,
+              }
+              yield {"status": "bm25_ready", "repo_name": repo_name, "summary": summary, "tree": tree}
+          elif event["status"] == "ready":
+              engine_bundle = event["bundle"]
+              repo_cache[cache_key]["engine_bundle"] = engine_bundle
+              yield {"status": "ready", "repo_name": repo_name, "summary": summary, "tree": tree}
+          else:
+              yield event
     except Exception as exc:
       logger.exception("FULL INGESTION TRACEBACK")
       traceback.print_exc()
@@ -163,17 +185,16 @@ async def load_repo(request: Request, req: RepoLoadRequest):
     media_type="application/x-ndjson",
   )
 
+
 async def _progressive_load(
     cache_key: str,
     repo_name: str,
-    index_coro_factory,
+    index_generator_factory,
 ) -> AsyncGenerator[str, None]:
     """Yield newline-delimited JSON progress events while indexing runs."""
-    yield json.dumps({"status": "cloning", "repo_name": repo_name}) + "\n"
-    await asyncio.sleep(0)
     try:
-        result = await index_coro_factory()
-        yield json.dumps({"status": "done", **result}) + "\n"
+        async for event in index_generator_factory():
+            yield json.dumps(event) + "\n"
     except Exception as exc:
         yield json.dumps({"status": "error", "detail": repr(exc)}) + "\n"
 
@@ -355,6 +376,7 @@ async def analyze_issue(
             "analysis":  analysis,
             "retrieval": retrieval,
             "reasoning": reasoning,
+            "retrieval_mode": "bm25_only" if engine_bundle.get("is_embedding") else "hybrid"
         }
 
     if stream:
@@ -453,7 +475,8 @@ async def ask_repo(request: Request,req: RepoQARequest):
         "project_structure": qa_result.get("project_structure", []),
         "sections": qa_result.get("sections", []),
         "citations": qa_result.get("citations", []),
-        "truncated": qa_result.get("truncated", False)
+        "truncated": qa_result.get("truncated", False),
+        "retrieval_mode": "bm25_only" if engine_bundle.get("is_embedding") else "hybrid"
     }
 
 @router.get("/repo-status")
