@@ -521,7 +521,7 @@ export default function ChatBox({ repoUrl, repoName, onReset }) {
             {msg.role === "assistant" && (
               <div style={{ display: "flex", flexDirection: "column", width: msg.type === "text" ? "auto" : "100%", maxWidth: msg.type === "text" ? "80%" : "100%", gap: 4 }}>
                 <span style={{ fontSize: 10, color: "#005015", letterSpacing: 2, paddingLeft: 2 }}>
-                  MENTOR@FIRSTPR $
+                  MENTOR@CONTRIB $
                 </span>
                 {msg.type === "text" && (
                   <div style={{
