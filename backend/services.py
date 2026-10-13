@@ -858,7 +858,12 @@ Return a JSON object with exactly these keys:
         return {}
 
 
-def run_retrieval_agent(engine_bundle: dict, issue_full: str) -> dict:
+def run_retrieval_agent(
+    engine_bundle: dict,
+    issue_full: str,
+    top_k: int = 10,
+    use_reranker: Optional[bool] = None,
+) -> dict:
   """
   Production-grade hybrid retrieval pipeline.
 
@@ -1032,84 +1037,125 @@ def run_retrieval_agent(engine_bundle: dict, issue_full: str) -> dict:
 
   candidates = dict(sorted_candidates[:40])
 
-  reranker_result = rerank(
-    candidates=candidates,
-    sources=sources,
-    issue_full=expanded_issue,
-    top_k=6,
-  )
+  if use_reranker is None:
+    use_reranker = getattr(settings, "reranker_enabled", True)
 
-  if reranker_result.low_confidence:
-
-    logger.warning(
-      "Low-confidence retrieval detected — expanding dependency graph"
-    )
-
-    seed_files = [
-      r.path
-      for r in reranker_result.ranked_files[:3]
-    ]
-
-    expanded = expand_dependency_neighbors(
-      seed_files,
-      sources,
-    )
-
-    for fp, score in expanded.items():
-
-      if fp in candidates:
-
-        old_score, old_method = candidates[fp]
-
-        candidates[fp] = (
-          old_score + score,
-          f"{old_method}+dependency"
-        )
-
-      else:
-
-        candidates[fp] = (
-          score,
-          "dependency"
-        )
-
+  if not use_reranker:
+    logger.info(f"Reranker disabled via config — selecting top {top_k} raw candidates")
+    relevant_files = []
+    for fp, (score, method) in sorted_candidates[:top_k]:
+      relevant_files.append({
+        "path": fp,
+        "relevance": "medium",
+        "score": round(score, 3),
+        "retrieval_score": round(score, 3),
+        "method": method,
+        "reason": f"Direct {method} retrieval without reranking",
+        "functions": [],
+        "classes": [],
+        "role": "",
+        "signals": {
+          "symbol": 0.0,
+          "filepath": 0.0,
+          "dep": 0.0,
+          "agreement": 0.0,
+          "penalty": 0.0,
+        },
+        "matched_symbols": [],
+      })
+    reranker_meta = {
+      "confidence_tier": "MEDIUM",
+      "anchor_file": None,
+      "low_confidence": False,
+      "confidence_score": 0.5,
+      "explanation": "Reranker disabled via configuration",
+    }
+  else:
     reranker_result = rerank(
       candidates=candidates,
       sources=sources,
       issue_full=expanded_issue,
-      top_k=6,
+      top_k=top_k,
     )
 
-  logger.info(
-    f"Reranker: {len(candidates)} candidates → "
-    f"{len(reranker_result.ranked_files)} after reranking | "
-    f"top_tier={reranker_result.confidence_tier} | "
-    f"anchor={reranker_result.anchor_file} | "
-    f"low_conf={reranker_result.low_confidence}"
-  )
+    if reranker_result.low_confidence:
 
-  relevant_files = []
+      logger.warning(
+        "Low-confidence retrieval detected — expanding dependency graph"
+      )
 
-  for r in reranker_result.ranked_files:
-    relevant_files.append({
-      "path": r.path,
-      "relevance": r.confidence_tier.lower(),
-      "score": r.composite_score,
-      "retrieval_score": round(r.retrieval_score, 3),
-      "method": r.retrieval_method,
-      "reason": r.reason,
-      "functions": r.functions,
-      "classes": r.classes,
-      "role": r.role,
-      "signals": {
-        "symbol": r.symbol_score,
-        "filepath": r.filepath_score,
-        "dep": r.dep_score,
-        "agreement": r.agreement_score,
-        "penalty": r.penalty,
-      },
-      "matched_symbols": r.matched_symbols,
-    })
+      seed_files = [
+        r.path
+        for r in reranker_result.ranked_files[:3]
+      ]
+
+      expanded = expand_dependency_neighbors(
+        seed_files,
+        sources,
+      )
+
+      for fp, score in expanded.items():
+
+        if fp in candidates:
+
+          old_score, old_method = candidates[fp]
+
+          candidates[fp] = (
+            old_score + score,
+            f"{old_method}+dependency"
+          )
+
+        else:
+
+          candidates[fp] = (
+            score,
+            "dependency"
+          )
+
+      reranker_result = rerank(
+        candidates=candidates,
+        sources=sources,
+        issue_full=expanded_issue,
+        top_k=top_k,
+      )
+
+    logger.info(
+      f"Reranker: {len(candidates)} candidates → "
+      f"{len(reranker_result.ranked_files)} after reranking | "
+      f"top_tier={reranker_result.confidence_tier} | "
+      f"anchor={reranker_result.anchor_file} | "
+      f"low_conf={reranker_result.low_confidence}"
+    )
+
+    relevant_files = []
+
+    for r in reranker_result.ranked_files:
+      relevant_files.append({
+        "path": r.path,
+        "relevance": r.confidence_tier.lower(),
+        "score": r.composite_score,
+        "retrieval_score": round(r.retrieval_score, 3),
+        "method": r.retrieval_method,
+        "reason": r.reason,
+        "functions": r.functions,
+        "classes": r.classes,
+        "role": r.role,
+        "signals": {
+          "symbol": r.symbol_score,
+          "filepath": r.filepath_score,
+          "dep": r.dep_score,
+          "agreement": r.agreement_score,
+          "penalty": r.penalty,
+        },
+        "matched_symbols": r.matched_symbols,
+      })
+    reranker_meta = {
+      "confidence_tier": reranker_result.confidence_tier,
+      "anchor_file": reranker_result.anchor_file,
+      "low_confidence": reranker_result.low_confidence,
+      "confidence_score": reranker_result.overall_confidence,
+      "explanation": reranker_result.explanation,
+    }
 
   fix_zone = None
 
@@ -1119,9 +1165,9 @@ def run_retrieval_agent(engine_bundle: dict, issue_full: str) -> dict:
     fix_zone = {
       "file_path": top.get("path"),
       "role": top.get("role"),
-      "localisation_tier": reranker_result.confidence_tier,
+      "localisation_tier": reranker_meta.get("confidence_tier", "MEDIUM"),
       "localisation_score": round(
-        reranker_result.overall_confidence,
+        reranker_meta.get("confidence_score", 0.5),
         3
       ),
       "matched_symbols": top.get("matched_symbols", [])[:8],
@@ -1159,14 +1205,14 @@ def run_retrieval_agent(engine_bundle: dict, issue_full: str) -> dict:
     "search_keywords": keywords,
     "most_likely_fix_zone": fix_zone,
     "reranker": {
-      "confidence_tier": reranker_result.confidence_tier,
+      "confidence_tier": reranker_meta.get("confidence_tier", "MEDIUM"),
       "overall_confidence": round(
-        reranker_result.overall_confidence,
+        reranker_meta.get("confidence_score", 0.5),
         3
       ),
-      "anchor_file": reranker_result.anchor_file,
-      "low_confidence": reranker_result.low_confidence,
-      "explanation": reranker_result.explanation,
+      "anchor_file": reranker_meta.get("anchor_file"),
+      "low_confidence": reranker_meta.get("low_confidence", False),
+      "explanation": reranker_meta.get("explanation", ""),
     },
   }
 

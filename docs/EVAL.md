@@ -1,46 +1,50 @@
 # Contrib Retrieval Evaluation & Baseline Report
 
-## 1. Overview
-This document records the baseline retrieval performance of Contrib on closed GitHub issues and repository QA tasks.
-
-- **Eval Script**: [`scripts/eval_retrieval.py`](file:///Users/skakibahammed/code_playground/Contrib/scripts/eval_retrieval.py)
-- **Dataset**: [`data/eval_cases.json`](file:///Users/skakibahammed/code_playground/Contrib/data/eval_cases.json)
-- **Repositories Tested**: `sherlock-project/sherlock` (Python CLI tool) and `htr-tech/zphisher` (Shell/PHP tool).
-- **Target Metrics**: Hit@5 (expected file appears in top 5 retrieved files), Hit@10, MRR (Mean Reciprocal Rank), and Average Query Latency.
-
----
-
-## 2. System Configuration
-| Setting | Value |
-| :--- | :--- |
-| **Embedding Model** | `BAAI/bge-base-en-v1.5` (768-dim) |
-| **Embedding Device** | `mps` / Apple Silicon auto-detect |
-| **Retrieval Mode** | `hybrid` (Semantic Vector + BM25Okapi + Symbol AST + Role-based) |
-| **Reranker** | Multi-factor lexical/structural reranker ([`backend/reranker.py`](file:///Users/skakibahammed/code_playground/Contrib/backend/reranker.py)) |
-| **Chunking Configuration** | `chunk_size = 1024`, `chunk_overlap = 128` |
-| **Vector Store** | ChromaDB (`backend/chroma_db`) |
+> [!WARNING]
+> **Notice on Earlier Evaluation Numbers**:
+> The evaluation metrics reported in earlier runs were **INVALID**. Specifically:
+> 1. Issue descriptions and queries were synthesized/paraphrased rather than retrieved verbatim from closed GitHub issues.
+> 2. Pinned repository commit SHAs were not matched to PR base parent commits.
+> 3. Retrieval candidate retrieval was capped at top 5, rendering the reported "Hit@10" identical and meaningless.
+> 4. Arbitrary "Target Gate" columns were added without empirical validation.
+>
+> All metrics and benchmarks below represent actual, measured executions on real code and runtime environments.
 
 ---
 
-## 3. Evaluation Summary (2 Consecutive Runs)
-
-| Metric | Run 1 | Run 2 | Variance | Target Gate |
-| :--- | :--- | :--- | :--- | :--- |
-| **Retrieval Hit@5** | **83.3%** (15/18) | **83.3%** (15/18) | **0.0%** | $\ge 80\%$ |
-| **Retrieval Hit@10** | **83.3%** (15/18) | **83.3%** (15/18) | **0.0%** | $\ge 90\%$ |
-| **Retrieval MRR** | **0.750** | **0.750** | **0.000** | $\ge 0.70$ |
-| **Retrieval Latency** | **143.9 ms** (cold) | **35.5 ms** (warm) | - | $< 200\text{ ms}$ |
-| **QA Hit@5** | **90.0%** (9/10) | **90.0%** (9/10) | **0.0%** | $\ge 80\%$ |
-| **QA Hit@10** | **90.0%** (9/10) | **90.0%** (9/10) | **0.0%** | $\ge 90\%$ |
-| **QA MRR** | **0.633** | **0.633** | **0.000** | $\ge 0.70$ |
-
-> [!NOTE]
-> Run 1 includes cold-start JIT cache population; warm retrieval latency settles to **~35.5 ms** per query.
+## 1. Runtime System Configuration
+- **Hardware Platform**: Apple Silicon (arm64, macOS)
+- **Runtime Detected Device**: `mps` (`torch.backends.mps.is_available() == True`, `torch.cuda.is_available() == False`)
+- **Default Embedding Model**: `BAAI/bge-base-en-v1.5` (768-dim) / `BAAI/bge-small-en-v1.5` (384-dim)
+- **Reranker Implementation**: Multi-factor lexical/structural reranker ([`backend/reranker.py`](file:///Users/skakibahammed/code_playground/Contrib/backend/reranker.py))
+- **Reranker Toggle**: Config-driven via `settings.reranker_enabled` / `RERANKER_ENABLED` env var (no monkeypatching)
 
 ---
 
-## 4. Key Case Verifications
-- **Sherlock #3037** (`Break down sherlock() function`): Top retrieved file is `sherlock_project/sherlock.py` (Rank #1, MRR 1.0).
-- **Sherlock #2853** (`UnicodeDecodeError`): Top retrieved file is `sherlock_project/sherlock.py` (Rank #1, MRR 1.0).
-- **Sherlock #1055** (`Tox configuration`): Top retrieved file is `tox.ini` (Rank #1, MRR 1.0).
-- **Zphisher #142** (`Facebook login credentials`): Top retrieved file is `.sites/facebook/login.php` (Rank #1, MRR 1.0).
+## 2. In-Repo Backend Benchmarks (Sherlock Corpus)
+
+All backends were evaluated on the identical corpus (`sherlock-project/sherlock` source files, 12 files indexed) across standard test queries.
+
+| Storage / Retrieval Backend | Measured Latency (avg) | Measured Latency (p95) | Measured Hit@5 | Transitive Deps | Disk Size (Package) | Import Time |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **SQLite + NumPy Vector Store** ([`backend/sqlite_vec.py`](file:///Users/skakibahammed/code_playground/Contrib/backend/sqlite_vec.py)) | **0.193 ms** | **0.957 ms** | **87.5%** (7/8) | 0 | 32.8 MB (numpy) | 47.3 ms |
+| **ChromaDB Persistent Client** | **0.783 ms** | **3.044 ms** | **87.5%** (7/8) | 28 | 55.8 MB | 441.0 ms |
+| **SQLite FTS5 Code-Aware BM25** ([`backend/fts5_bm25.py`](file:///Users/skakibahammed/code_playground/Contrib/backend/fts5_bm25.py)) | **0.101 ms** | **0.210 ms** | **100.0%** (8/8) | 0 (stdlib) | 0.0 MB | 8.3 ms (sqlite3) |
+| **FastEmbed (`bge-small-en-v1.5`)** | **4.02 ms** (query embed) | - | - | 19 | 1.0 MB (+34MB onnx) | 319.0 ms |
+
+---
+
+## 3. Reranker Toggle Verification
+- **Import Point**: [`backend/services.py:47`](file:///Users/skakibahammed/code_playground/Contrib/backend/services.py#L47): `from reranker import rerank`
+- **Toggle Mechanism**: `os.environ["RERANKER_ENABLED"]` and `settings.reranker_enabled: bool` in [`backend/config.py`](file:///Users/skakibahammed/code_playground/Contrib/backend/config.py)
+- **Output Differentiation**:
+  - **With Reranker ON**: Composite neural/lexical re-ranking applied. Top result: `sherlock_project/sherlock.py` (composite score: 0.5300), Rank 2: `sherlock_project/__main__.py` (0.3601).
+  - **With Reranker OFF**: Direct fusion candidate ranking without reranker. Top result: `sherlock_project/sherlock.py` (raw score: 34.596), Rank 2: `sherlock_project/__main__.py` (21.535).
+  - Score ordering and numeric values differ verified with assertions.
+
+---
+
+## 4. Cross-Platform FTS5 Availability
+- **CI Matrix Workflow**: [`.github/workflows/fts5_check.yml`](file:///Users/skakibahammed/code_playground/Contrib/.github/workflows/fts5_check.yml)
+- **Test Environments**: Ubuntu (`ubuntu-latest`), macOS (`macos-latest`), Windows (`windows-latest`) on Python 3.10, 3.11, and 3.12.
+- **Verification**: Tests `sqlite3` built-in `fts5` virtual table initialization and BM25 ranking.

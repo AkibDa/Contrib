@@ -94,6 +94,9 @@ class Settings:
   max_repo_mb: int      = field(
     default_factory=lambda: _env_int("MAX_REPO_MB", 300)
   )
+  reranker_enabled: bool = field(
+    default_factory=lambda: _env("RERANKER_ENABLED", "true").lower() in ("true", "1", "yes")
+  )
   log_level: str        = field(
     default_factory=lambda: _env("LOG_LEVEL", "INFO").upper()
   )
