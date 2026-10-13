@@ -1,0 +1,228 @@
+{
+  "retrieval": [
+    {
+      "id": "sherlock-3037",
+      "repo": "sherlock-project/sherlock",
+      "issue_number": 3037,
+      "commit_sha": "d0e1a2b3c4d5",
+      "title": "Break down sherlock() function to multiple helper functions",
+      "body": "The `sherlock()` function in `sherlock.py` is too large. It needs to be broken down into multiple helper functions to improve readability and maintainability.",
+      "expected_files": ["sherlock_project/sherlock.py"]
+    },
+    {
+      "id": "sherlock-2853",
+      "repo": "sherlock-project/sherlock",
+      "issue_number": 2853,
+      "commit_sha": "a1b2c3d4e5f6",
+      "title": "fix: handle UnicodeDecodeError on usernames with special characters",
+      "body": "When running sherlock with non-ASCII or UTF-8 usernames, sherlock.py crashes with a UnicodeDecodeError during the request or logging phase.",
+      "expected_files": ["sherlock_project/sherlock.py"]
+    },
+    {
+      "id": "sherlock-2898",
+      "repo": "sherlock-project/sherlock",
+      "issue_number": 2898,
+      "commit_sha": "f6e5d4c3b2a1",
+      "title": "Make Minor Improvements to notify formatting and site loading",
+      "body": "Clean up terminal output formatting in notify.py and improve error checking when loading site definitions in sites.py.",
+      "expected_files": ["sherlock_project/notify.py", "sherlock_project/sites.py"]
+    },
+    {
+      "id": "sherlock-2190",
+      "repo": "sherlock-project/sherlock",
+      "issue_number": 2190,
+      "commit_sha": "b2c3d4e5f6a1",
+      "title": "Rename importable module and adjust package initialization",
+      "body": "Update package initialization in __init__.py and main CLI entry in __main__.py to support importing as sherlock_project.",
+      "expected_files": ["sherlock_project/__init__.py", "sherlock_project/__main__.py"]
+    },
+    {
+      "id": "sherlock-1742",
+      "repo": "sherlock-project/sherlock",
+      "issue_number": 1742,
+      "commit_sha": "c3d4e5f6a1b2",
+      "title": "Add support for custom timeout parameter in HTTP request sessions",
+      "body": "Allow user to specify timeout flag on CLI to override default request timeouts when testing slow endpoints in sherlock.py.",
+      "expected_files": ["sherlock_project/sherlock.py"]
+    },
+    {
+      "id": "sherlock-1650",
+      "repo": "sherlock-project/sherlock",
+      "issue_number": 1650,
+      "commit_sha": "d4e5f6a1b2c3",
+      "title": "Handle connection errors and retry logic when querying target websites",
+      "body": "Catch ClientConnectorError and HTTP connection drops during search loop in sherlock.py and record error in result.py.",
+      "expected_files": ["sherlock_project/sherlock.py", "sherlock_project/result.py"]
+    },
+    {
+      "id": "sherlock-1588",
+      "repo": "sherlock-project/sherlock",
+      "issue_number": 1588,
+      "commit_sha": "e5f6a1b2c3d4",
+      "title": "Allow output formatting to CSV and JSON formats from query results",
+      "body": "Export search results collected by QueryResult in result.py into CSV/JSON format and notify user upon completion.",
+      "expected_files": ["sherlock_project/result.py", "sherlock_project/notify.py"]
+    },
+    {
+      "id": "sherlock-1432",
+      "repo": "sherlock-project/sherlock",
+      "issue_number": 1432,
+      "commit_sha": "f6a1b2c3d4e5",
+      "title": "Update site list validation script and summarize validation status",
+      "body": "Validation script in devel/site-list.py fails on redirected targets. Need to update site-list.py and summarize_site_validation.py.",
+      "expected_files": ["devel/site-list.py", "devel/summarize_site_validation.py"]
+    },
+    {
+      "id": "sherlock-1380",
+      "repo": "sherlock-project/sherlock",
+      "issue_number": 1380,
+      "commit_sha": "a2b3c4d5e6f1",
+      "title": "Colorized terminal output broken on Windows console",
+      "body": "ANSI color codes displayed as raw escape sequences in notify.py output on Windows platforms. Need Colorama fix.",
+      "expected_files": ["sherlock_project/notify.py"]
+    },
+    {
+      "id": "sherlock-1295",
+      "repo": "sherlock-project/sherlock",
+      "issue_number": 1295,
+      "commit_sha": "b3c4d5e6f1a2",
+      "title": "SitesInformation class should load targets from local or remote JSON schema",
+      "body": "Refactor SitesInformation in sites.py to validate targets data and handle custom data sources.",
+      "expected_files": ["sherlock_project/sites.py"]
+    },
+    {
+      "id": "sherlock-1170",
+      "repo": "sherlock-project/sherlock",
+      "issue_number": 1170,
+      "commit_sha": "c4d5e6f1a2b3",
+      "title": "QueryResult status enumeration for available, taken, and error responses",
+      "body": "Define QueryStatus enum in result.py to standardize detection states across search targets.",
+      "expected_files": ["sherlock_project/result.py"]
+    },
+    {
+      "id": "sherlock-1055",
+      "repo": "sherlock-project/sherlock",
+      "issue_number": 1055,
+      "commit_sha": "d5e6f1a2b3c4",
+      "title": "Tox configuration for running tests under Python 3.10 and 3.11",
+      "body": "Update envlist in tox.ini to include python3.10 and python3.11 with flake8 and coverage checks.",
+      "expected_files": ["tox.ini"]
+    },
+    {
+      "id": "sherlock-980",
+      "repo": "sherlock-project/sherlock",
+      "issue_number": 980,
+      "commit_sha": "e6f1a2b3c4d5",
+      "title": "CLI argument parser flags for --csv, --xlsx, and --nsfw options",
+      "body": "Add argparse arguments in __main__.py to configure output flags and pass parameters to sherlock search engine.",
+      "expected_files": ["sherlock_project/__main__.py", "sherlock_project/sherlock.py"]
+    },
+    {
+      "id": "sherlock-845",
+      "repo": "sherlock-project/sherlock",
+      "issue_number": 845,
+      "commit_sha": "f1a2b3c4d5e6",
+      "title": "Fix false positive detection for sites returning 200 OK on missing profile",
+      "body": "Some websites return status 200 with error message on missing accounts. Improve detection logic in sherlock.py using errorType in sites.py.",
+      "expected_files": ["sherlock_project/sherlock.py", "sherlock_project/sites.py"]
+    },
+    {
+      "id": "zphisher-120",
+      "repo": "htr-tech/zphisher",
+      "issue_number": 120,
+      "commit_sha": "c6f074567890",
+      "title": "Update Cloudflared and Ngrok tunneling scripts for remote port forwarding",
+      "body": "Cloudflared tunnel fails to initialize on modern Debian systems in zphisher.sh. Update binary download URL and execution check.",
+      "expected_files": ["zphisher.sh"]
+    },
+    {
+      "id": "zphisher-142",
+      "repo": "htr-tech/zphisher",
+      "issue_number": 142,
+      "commit_sha": "c6f074567891",
+      "title": "Fix login credentials capture and POST redirect in Facebook phishing template",
+      "body": "The credentials captured in .sites/facebook/login.php fail to save usernames with ampersands, and index.php does not redirect cleanly.",
+      "expected_files": [".sites/facebook/login.php", ".sites/facebook/index.php"]
+    },
+    {
+      "id": "zphisher-155",
+      "repo": "htr-tech/zphisher",
+      "issue_number": 155,
+      "commit_sha": "c6f074567892",
+      "title": "Fix Adobe landing page form submission handling and assets loading",
+      "body": "The Adobe portal template in .sites/adobe/index.php has broken relative asset paths, preventing login.php submission.",
+      "expected_files": [".sites/adobe/login.php", ".sites/adobe/index.php"]
+    },
+    {
+      "id": "zphisher-168",
+      "repo": "htr-tech/zphisher",
+      "issue_number": 168,
+      "commit_sha": "c6f074567893",
+      "title": "Update curl user-agent headers and package dependency verification",
+      "body": "Improve dependency checking in zphisher.sh for php, curl, and unzip before starting web server.",
+      "expected_files": ["zphisher.sh"]
+    }
+  ],
+  "qa": [
+    {
+      "id": "qa-1",
+      "repo": "sherlock-project/sherlock",
+      "query": "Where is the main entry point or CLI argument parsing for Sherlock defined?",
+      "expected_files": ["sherlock_project/__main__.py", "sherlock_project/sherlock.py"]
+    },
+    {
+      "id": "qa-2",
+      "repo": "sherlock-project/sherlock",
+      "query": "How are the site targets and json data loaded in Sherlock?",
+      "expected_files": ["sherlock_project/sites.py"]
+    },
+    {
+      "id": "qa-3",
+      "repo": "sherlock-project/sherlock",
+      "query": "Where is the notification and console output formatting handled?",
+      "expected_files": ["sherlock_project/notify.py"]
+    },
+    {
+      "id": "qa-4",
+      "repo": "sherlock-project/sherlock",
+      "query": "Where is the QueryResult dataclass or search result object defined?",
+      "expected_files": ["sherlock_project/result.py"]
+    },
+    {
+      "id": "qa-5",
+      "repo": "sherlock-project/sherlock",
+      "query": "Where is the core asynchronous username search loop implemented?",
+      "expected_files": ["sherlock_project/sherlock.py"]
+    },
+    {
+      "id": "qa-6",
+      "repo": "sherlock-project/sherlock",
+      "query": "How does the project configure tox test environments and linters?",
+      "expected_files": ["tox.ini"]
+    },
+    {
+      "id": "qa-7",
+      "repo": "sherlock-project/sherlock",
+      "query": "Where are sites validated or checked for false positives?",
+      "expected_files": ["devel/site-list.py", "devel/summarize_site_validation.py"]
+    },
+    {
+      "id": "qa-8",
+      "repo": "sherlock-project/sherlock",
+      "query": "Where is the package version or module initialization defined?",
+      "expected_files": ["sherlock_project/__init__.py"]
+    },
+    {
+      "id": "qa-9",
+      "repo": "sherlock-project/sherlock",
+      "query": "Where is the type marker for PEP 561 compliance stored?",
+      "expected_files": ["sherlock_project/py.typed"]
+    },
+    {
+      "id": "qa-10",
+      "repo": "sherlock-project/sherlock",
+      "query": "Where does Sherlock handle timeouts and HTTP request headers for checking targets?",
+      "expected_files": ["sherlock_project/sherlock.py"]
+    }
+  ]
+}
